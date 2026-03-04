@@ -200,6 +200,17 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             else:
                 print(f"Dry run: Would click 'Apply now' on {listing_url}.")
 
+            # Step 2.5: Sometimes there forms a "Proceed to application" popup first
+            proceed_btn = page.locator("button#continue_button, a#continue_button, button:has-text('Proceed'), a:has-text('Proceed')").first
+            try:
+                proceed_btn.wait_for(state="visible", timeout=5000)
+                if not dry_run:
+                    print("Clicking 'Proceed to application'...")
+                    proceed_btn.click(timeout=10000, force=True)
+            except PlaywrightTimeoutError:
+                # It's fine if there is no "Proceed" button, might go straight to Submit
+                pass
+
             # Step 3: Wait for the Submit Application flow (might be on next page or modal)
             submit_btn = page.locator("button#submit, input#submit, button.submit_button_to_show, button:has-text('Submit'), input[type='submit']").first
             try:
