@@ -175,10 +175,10 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             print(f"\nListing {i}: '{role}' at '{company}' ({listing_url})")
 
             # Step 1: Open the popup by clicking the listing
-            listing.click(timeout=10000)
+            listing.click(timeout=10000, force=True)
 
             # Step 1.5: Wait for the modal to appear (guard)
-            modal_selector = "div.modal, div.popup, div#application-modal"
+            modal_selector = "div.modal, div.popup, div#application-modal, div#easy_apply_modal"
             try:
                 page.wait_for_selector(modal_selector, timeout=15000)
             except PlaywrightTimeoutError:
@@ -193,7 +193,7 @@ def apply_one_click_internships(page, keywords, dry_run=False):
 
             if not dry_run:
                 print("Applying: clicking 'Apply now' in popup.")
-                popup_apply.click(timeout=10000)
+                popup_apply.click(timeout=10000, force=True)
             else:
                 print(f"Dry run: Would click 'Apply now' in popup for listing {i}.")
 
@@ -203,7 +203,7 @@ def apply_one_click_internships(page, keywords, dry_run=False):
                 print(f"Listing {i}: Submit button not found after Apply. Skipping.")
                 continue
             if not dry_run:
-                submit_btn.click(timeout=10000)
+                submit_btn.click(timeout=10000, force=True)
             else:
                 print(f"Dry run: Would click Submit for listing {i}.")
 
