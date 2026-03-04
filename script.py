@@ -1,5 +1,6 @@
 import os
 import json
+import csv
 import datetime
 import argparse
 from pathlib import Path
@@ -8,8 +9,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Configuration ---
-LOG_DIR = "logs"
-LOG_FILE = Path(LOG_DIR) / "internshala_applied.json"
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+LOG_FILE = Path(LOG_DIR) / "internshala_applied.csv"
 INTERNSHALA_URL = "https://internshala.com"
 INTERNSHIPS_SEARCH_URL = "https://internshala.com/internships/matching-preferences/"
 
@@ -38,21 +39,26 @@ def load_credentials():
 
 
 def save_log(records):
-    """Appends new application records to the JSON log file."""
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    existing_records = []
-    if LOG_FILE.exists():
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            try:
-                existing_records = json.load(f)
-            except json.JSONDecodeError:
-                print(f"Warning: Could not decode existing log file {LOG_FILE}. Starting fresh.")
-                existing_records = []
+    """Appends new application records to a CSV log file."""
+    if not records:
+        return
 
-    existing_records.extend(records)
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(existing_records, f, indent=2, ensure_ascii=False)
-    print(f"Logged {len(records)} new application(s) to {LOG_FILE}")
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    file_exists = LOG_FILE.exists()
+    
+    # We define the column headers based on our record dictionary keys
+    fieldnames = ["company", "role", "date_applied", "listing_url", "status"]
+
+    with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        
+        if not file_exists:
+            writer.writeheader()  # Write headers only if the file is new
+            
+        for record in records:
+            writer.writerow(record)
+            
+    print(f"Logged {len(records)} new application(s) to '{LOG_FILE}'")
 
 
 def get_system_time_iso():
