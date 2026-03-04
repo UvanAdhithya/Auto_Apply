@@ -212,14 +212,15 @@ def apply_one_click_internships(page, keywords, dry_run=False):
                 print(f"Listing {i}: Submit button not found after clicking Apply. Skipping.")
                 continue
 
-            # Optional: wait for a lightweight confirmation
+            # Optional: wait for a lightweight confirmation or network idle
             if not dry_run:
-                confirm_sel = "div.apply_success_message, div.success-popup, div.toast-message, div[role='alert'], div.application_status_heading"
                 try:
-                    page.wait_for_selector(confirm_sel, timeout=10000)
+                    # Internshala's success popups change frequently or navigate to a new page.
+                    # Waiting for network idle is a more robust way to ensure the submit finished.
+                    page.wait_for_load_state("networkidle", timeout=15000)
                     print(f"Application submitted for '{role}' at '{company}'.")
                 except PlaywrightTimeoutError:
-                    print(f"Applied for '{role}' but no confirmation detected (continuing).")
+                    print(f"Applied for '{role}'. Network didn't fully idle, but proceeding...")
             else:
                 print(f"Dry run: Simulated application for '{role}' at '{company}'.")
 
