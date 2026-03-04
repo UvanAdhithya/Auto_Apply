@@ -213,12 +213,15 @@ def apply_one_click_internships(page, keywords, dry_run=False):
                 continue
 
             # Optional: wait for a lightweight confirmation
-            confirm_sel = "div.apply_success_message, div.success-popup, div.toast-message, div[role='alert'], div.application_status_heading"
-            try:
-                page.wait_for_selector(confirm_sel, timeout=10000)
-                print(f"Application submitted for '{role}' at '{company}'.")
-            except PlaywrightTimeoutError:
-                print(f"Applied for '{role}' but no confirmation detected (continuing).")
+            if not dry_run:
+                confirm_sel = "div.apply_success_message, div.success-popup, div.toast-message, div[role='alert'], div.application_status_heading"
+                try:
+                    page.wait_for_selector(confirm_sel, timeout=10000)
+                    print(f"Application submitted for '{role}' at '{company}'.")
+                except PlaywrightTimeoutError:
+                    print(f"Applied for '{role}' but no confirmation detected (continuing).")
+            else:
+                print(f"Dry run: Simulated application for '{role}' at '{company}'.")
 
             # Log the application
             status = "dry_run" if dry_run else "applied"
