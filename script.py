@@ -4,6 +4,8 @@ import datetime
 import argparse
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- Configuration ---
 LOG_DIR = "logs"
@@ -64,30 +66,42 @@ def login_to_internshala(page, username, password):
     print(f"Navigating to {INTERNSHALA_URL} for login...")
     try:
         page.goto(INTERNSHALA_URL)
-        # Wait for and click the login button
-        login_button_selector = "a:has-text('Login')" # Common selector
-        page.click(login_button_selector, timeout=15000)
+        
+        # Check if already logged in (persistent context)
+        try:
+            # Check if login button is present. If not, we are likely already logged in.
+            login_btn = page.wait_for_selector("button.login-cta", timeout=5000)
+            print("Not logged in. Proceeding with credentials...")
+        except PlaywrightTimeoutError:
+            print("Login button not found. Assuming already logged in (session restored).")
+            return True
+
+        # Click the login button
+        login_btn.click()
+        page.wait_for_selector("#login-modal", state="visible", timeout=10000)
         print("Clicked login button. Filling credentials...")
-
+    
         # Wait for login form fields and fill them
-        # Selectors might need adjustment if Internshala's HTML changes
-        username_field_selector = "input[name='username']"
-        password_field_selector = "input[name='password']"
-        submit_button_selector = "button[type='submit']"
+        username_field_selector = "input#modal_email"
+        password_field_selector = "input#modal_password"
+        submit_button_selector = "button#modal_login_submit"
 
-        page.fill(username_field_selector, username, timeout=10000)
-        page.fill(password_field_selector, password, timeout=10000)
+        page.locator(username_field_selector).press_sequentially(username, delay=50)
+        page.locator(password_field_selector).press_sequentially(password, delay=50)
 
         # Click the submit button
         page.click(submit_button_selector, timeout=10000)
 
         # Wait for navigation or a success indicator (e.g., user dashboard element)
-        # A simple approach is waiting for the internships page after login
-        page.wait_for_url("**/internships", timeout=20000)
+        # Waiting for the login modal to disappear indicates success or page reload
+        print("Waiting up to 90 seconds for login to complete (Solve reCAPTCHA manually if prompted)...")
+        page.wait_for_selector("#login-modal", state="hidden", timeout=1600000)
+        page.wait_for_load_state("domcontentloaded")
         print("Login successful.")
         return True
     except PlaywrightTimeoutError as e:
-        print(f"Login failed: Timeout while waiting for page elements. {e}")
+        page.screenshot(path="login_failure.png")
+        print(f"Login failed: Timeout while waiting for page elements. Saved login_failure.png. {e}")
         return False
     except Exception as e:
         print(f"An unexpected error occurred during login: {e}")
@@ -100,7 +114,7 @@ def search_and_filter_internships(page):
     try:
         page.goto(INTERNSHIPS_SEARCH_URL, timeout=20000)
 
-        # Combine keywords for a general search or apply them sequentially if there's a specific mechanism
+        # Combine keywords for a general search or apply them sequentially if there's a specific mechanisms
         # For simplicity, we'll try to submit a multi-keyword search query if possible,
         # or simulate a search. Inspecting Internshala's search input is key here.
         # If there is a single search input that accepts multiple keywords, use that.
@@ -109,7 +123,7 @@ def search_and_filter_internships(page):
 
         print("Waiting for internship listings to load...")
         # Wait for a common element that indicates listings are present
-        page.wait_for_selector("div.internship_listing", timeout=20000)
+        page.wait_for_selector("div.individual_internship", timeout=20000)
         print("Internship listings page loaded.")
         return True
     except PlaywrightTimeoutError as e:
@@ -130,7 +144,7 @@ def apply_one_click_internships(page, keywords, dry_run=False):
     """
     print(f"\nScanning listings on matching preferences page for one-click apply (popup flow)...")
     applied_records = []
-    listings = page.query_selector_all("div.internship_listing")
+    listings = page.query_selector_all("div.individual_internship")
 
     if not listings:
         print("No listings found on the matching preferences page.")
@@ -138,9 +152,9 @@ def apply_one_click_internships(page, keywords, dry_run=False):
 
     for i, listing in enumerate(listings, start=1):
         try:
-            company_el = listing.query_selector("div.company_name a")
-            role_el = listing.query_selector("div.internship_heading_title")
-            listing_url_el = listing.query_selector("div.internship_heading_title a")
+            company_el = listing.query_selector("p.company-name, div.company_name a")
+            role_el = listing.query_selector("h3.job-internship-name a, div.internship_heading_title")
+            listing_url_el = listing.query_selector("h3.job-internship-name a, div.internship_heading_title a")
 
             if not (company_el and role_el and listing_url_el):
                 print(f"Listing {i}: missing basics, skipping.")
@@ -224,26 +238,31 @@ def apply_one_click_internships(page, keywords, dry_run=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Simulate actions without applying.")
+    parser.add_argument("--headed", action="store_true", help="Run headed to solve CAPTCHA manually.")
     args = parser.parse_args()
     dry_run = bool(args.dry_run)
+    headed = bool(args.headed)
 
     username, password = load_credentials()
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
+        user_data_dir = os.path.join(os.getcwd(), "internshala_session")
+        print(f"Using persistent browser session in: {user_data_dir}")
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=user_data_dir,
+            headless=not headed,
+            viewport={'width': 1920, 'height': 1080}
+        )
+        page = context.pages[0] if context.pages else context.new_page()
 
         login_ok = login_to_internshala(page, username, password)
         if not login_ok:
             print("Aborting due to login failure.")
             context.close()
-            browser.close()
             return
 
         if not search_and_filter_internships(page):
             print("Aborting due to listings load failure.")
             context.close()
-            browser.close()
             return
 
         records = apply_one_click_internships(page, KEYWORDS, dry_run=dry_run)
@@ -253,7 +272,6 @@ def main():
             print("No applications recorded.")
 
         context.close()
-        browser.close()
 
 
 if __name__ == "__main__":
