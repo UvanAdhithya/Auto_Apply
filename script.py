@@ -156,6 +156,9 @@ def apply_one_click_internships(page, keywords, dry_run=False):
         print("No listings found on the matching preferences page.")
         return []
 
+    # First, collect all listings so we don't pollute the DOM iteration by navigating away
+    listings_data = []
+    
     for i, listing in enumerate(listings, start=1):
         try:
             company_el = listing.query_selector("p.company-name, div.company_name a")
@@ -163,7 +166,6 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             listing_url_el = listing.query_selector("h3.job-internship-name a, div.internship_heading_title a")
 
             if not (company_el and role_el and listing_url_el):
-                print(f"Listing {i}: missing basics, skipping.")
                 continue
 
             company = company_el.inner_text().strip()
@@ -171,67 +173,65 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             listing_url = listing_url_el.get_attribute("href")
             if not listing_url.startswith("http"):
                 listing_url = "https://internshala.com" + listing_url
+                
+            listings_data.append({
+                "index": i, "company": company, "role": role, "listing_url": listing_url
+            })
+        except Exception as e:
+            print(f"Error extracting listing {i}: {e}")
 
-            print(f"\nListing {i}: '{role}' at '{company}' ({listing_url})")
+    # Now navigate to each listing directly
+    for data in listings_data:
+        i, company, role, listing_url = data["index"], data["company"], data["role"], data["listing_url"]
+        print(f"\nListing {i}: '{role}' at '{company}' ({listing_url})")
 
-            # Step 1: Open the popup by clicking the listing
-            listing.click(timeout=10000, force=True)
+        try:
+            # Step 1: Navigate directly to the listing details page
+            page.goto(listing_url, timeout=20000)
 
-            # Step 1.5: Wait for the modal to appear (guard)
-            modal_selector = "div.modal, div.popup, div#application-modal, div#easy_apply_modal"
+            # Step 2: Find the "Apply now" button
+            apply_now_btn = page.locator("button#make_new_application, button:has-text('Apply now'), a:has-text('Apply now')").first
             try:
-                page.wait_for_selector(modal_selector, timeout=15000)
+                apply_now_btn.wait_for(state="visible", timeout=10000)
             except PlaywrightTimeoutError:
-                print(f"Listing {i}: Modal did not appear after clicking listing. Skipping.")
-                continue
-
-            # Step 2: Within the modal, click the "Apply now" button
-            popup_apply = listing.parent.locator("button.continue_button, button:has-text('Apply now'), a.continue_button, a:has-text('Apply now')").first
-            if popup_apply.count() == 0:
-                print(f"Listing {i}: 'Apply now' button not found in popup. Skipping.")
+                print(f"Listing {i}: 'Apply now' button not found on page. Skipping.")
                 continue
 
             if not dry_run:
-                print("Applying: clicking 'Apply now' in popup.")
-                popup_apply.click(timeout=10000, force=True)
+                print("Applying: clicking 'Apply now'.")
+                apply_now_btn.click(timeout=10000, force=True)
             else:
-                print(f"Dry run: Would click 'Apply now' in popup for listing {i}.")
+                print(f"Dry run: Would click 'Apply now' on {listing_url}.")
 
-            # Step 3: Click the Submit button in the flow
-            submit_btn = page.locator("button#submit, input#submit, button:has-text('Submit'), input[type='submit']").first
-            if submit_btn.count() == 0:
-                print(f"Listing {i}: Submit button not found after Apply. Skipping.")
+            # Step 3: Wait for the Submit Application flow (might be on next page or modal)
+            submit_btn = page.locator("button#submit, input#submit, button.submit_button_to_show, button:has-text('Submit'), input[type='submit']").first
+            try:
+                submit_btn.wait_for(state="visible", timeout=10000)
+                if not dry_run:
+                    submit_btn.click(timeout=10000, force=True)
+                else:
+                    print(f"Dry run: Would click Submit for listing {i}.")
+            except PlaywrightTimeoutError:
+                print(f"Listing {i}: Submit button not found after clicking Apply. Skipping.")
                 continue
-            if not dry_run:
-                submit_btn.click(timeout=10000, force=True)
-            else:
-                print(f"Dry run: Would click Submit for listing {i}.")
 
             # Optional: wait for a lightweight confirmation
-            confirm_sel = "div.apply_success_message, div.success-popup, div.toast-message, div[role='alert']"
+            confirm_sel = "div.apply_success_message, div.success-popup, div.toast-message, div[role='alert'], div.application_status_heading"
             try:
-                page.wait_for_selector(confirm_sel, timeout=15000)
+                page.wait_for_selector(confirm_sel, timeout=10000)
                 print(f"Application submitted for '{role}' at '{company}'.")
             except PlaywrightTimeoutError:
                 print(f"Applied for '{role}' but no confirmation detected (continuing).")
 
-            # Log the application if not a dry run
-            if not dry_run:
-                applied_records.append({
-                    "company": company,
-                    "role": role,
-                    "date_applied": get_system_time_iso(),
-                    "listing_url": listing_url,
-                    "status": "applied"
-                })
-            else:
-                applied_records.append({
-                    "company": company,
-                    "role": role,
-                    "date_applied": get_system_time_iso(),
-                    "listing_url": listing_url,
-                    "status": "dry_run"
-                })
+            # Log the application
+            status = "dry_run" if dry_run else "applied"
+            applied_records.append({
+                "company": company,
+                "role": role,
+                "date_applied": get_system_time_iso(),
+                "listing_url": listing_url,
+                "status": status
+            })
 
         except Exception as e:
             print(f"Error processing listing {i}: {e}")
