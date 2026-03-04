@@ -38,9 +38,9 @@ def load_credentials():
     return username, password
 
 
-def save_log(records):
-    """Appends new application records to a CSV log file."""
-    if not records:
+def save_log(record):
+    """Appends a new application record to a CSV log file in real-time."""
+    if not record:
         return
 
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -55,10 +55,7 @@ def save_log(records):
         if not file_exists:
             writer.writeheader()  # Write headers only if the file is new
             
-        for record in records:
-            writer.writerow(record)
-            
-    print(f"Logged {len(records)} new application(s) to '{LOG_FILE}'")
+        writer.writerow(record)
 
 
 def get_system_time_iso():
@@ -225,13 +222,15 @@ def apply_one_click_internships(page, keywords, dry_run=False):
 
             # Log the application
             status = "dry_run" if dry_run else "applied"
-            applied_records.append({
+            new_record = {
                 "company": company,
                 "role": role,
                 "date_applied": get_system_time_iso(),
                 "listing_url": listing_url,
                 "status": status
-            })
+            }
+            applied_records.append(new_record)
+            save_log(new_record)
 
         except Exception as e:
             print(f"Error processing listing {i}: {e}")
@@ -272,9 +271,7 @@ def main():
             return
 
         records = apply_one_click_internships(page, KEYWORDS, dry_run=dry_run)
-        if records:
-            save_log(records)
-        else:
+        if not records:
             print("No applications recorded.")
 
         context.close()
