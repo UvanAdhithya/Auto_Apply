@@ -58,10 +58,39 @@ def save_log(record):
     with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         
-        if not file_exists:
-            writer.writeheader()  # Write headers only if the file is new
-            
         writer.writerow(record)
+
+
+def robust_wait_and_click(page, selector_key, timeout=10000, force=False):
+    """Waits for and clicks a selector, triggering the self-healing AI if it fails."""
+    try:
+        element = page.locator(SELECTORS[selector_key]).first
+        element.wait_for(state="visible", timeout=timeout)
+        element.click(timeout=timeout, force=force)
+        return True
+    except PlaywrightTimeoutError:
+        print(f"Timeout waiting for '{selector_key}'. Triggering self-healing AI agent...")
+        try:
+            import agent
+            # Take a screenshot before healing just in case
+            page.screenshot(path=f"healing_trigger_{selector_key}.png")
+            
+            # Send HTML to the CrewAI agents
+            agent.heal_selectors(page.content())
+            
+            # Reload fresh SELECTORS from the YAML file that the agent just fixed
+            with open(SELECTORS_FILE, "r") as f:
+                SELECTORS.update(yaml.safe_load(f)["selectors"])
+                
+            new_selector = SELECTORS[selector_key]
+            print(f"Retrying '{selector_key}' with AI-fixed selector: {new_selector}")
+            element = page.locator(new_selector).first
+            element.wait_for(state="visible", timeout=timeout)
+            element.click(timeout=timeout, force=force)
+            return True
+        except Exception as e:
+            print(f"Self-healing failed for '{selector_key}': {e}")
+            return False
 
 
 def get_system_time_iso():
@@ -192,17 +221,13 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             # Step 1: Navigate directly to the listing details page
             page.goto(listing_url, timeout=20000)
 
-            # Step 2: Find the "Apply now" button
-            apply_now_btn = page.locator(SELECTORS["apply_now_btn"]).first
-            try:
-                apply_now_btn.wait_for(state="visible", timeout=10000)
-            except PlaywrightTimeoutError:
-                print(f"Listing {i}: 'Apply now' button not found on page. Skipping.")
-                continue
-
+            # Step 2: Click the "Apply now" button (with Self-Healing Agent wrapper)
             if not dry_run:
-                print("Applying: clicking 'Apply now'.")
-                apply_now_btn.click(timeout=10000, force=True)
+                print("Applying: clicking 'Apply now'...")
+                success = robust_wait_and_click(page, "apply_now_btn", force=True)
+                if not success:
+                    print(f"Listing {i}: 'Apply now' button ultimately not found. Skipping.")
+                    continue
             else:
                 print(f"Dry run: Would click 'Apply now' on {listing_url}.")
 
