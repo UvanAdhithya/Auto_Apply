@@ -3,6 +3,7 @@ import json
 import csv
 import datetime
 import argparse
+import yaml
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from dotenv import load_dotenv
@@ -11,6 +12,11 @@ load_dotenv()
 # --- Configuration ---
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 LOG_FILE = Path(LOG_DIR) / "internshala_applied.csv"
+
+SELECTORS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "selectors.yaml")
+with open(SELECTORS_FILE, "r") as f:
+    SELECTORS = yaml.safe_load(f)["selectors"]
+
 INTERNSHALA_URL = "https://internshala.com"
 INTERNSHIPS_SEARCH_URL = "https://internshala.com/internships/matching-preferences/"
 
@@ -73,7 +79,7 @@ def login_to_internshala(page, username, password):
         # Check if already logged in (persistent context)
         try:
             # Check if login button is present. If not, we are likely already logged in.
-            login_btn = page.wait_for_selector("button.login-cta", timeout=5000)
+            login_btn = page.wait_for_selector(SELECTORS["login_btn_check"], timeout=5000)
             print("Not logged in. Proceeding with credentials...")
         except PlaywrightTimeoutError:
             print("Login button not found. Assuming already logged in (session restored).")
@@ -81,13 +87,13 @@ def login_to_internshala(page, username, password):
 
         # Click the login button
         login_btn.click()
-        page.wait_for_selector("#login-modal", state="visible", timeout=10000)
+        page.wait_for_selector(SELECTORS["login_modal_visible"], state="visible", timeout=10000)
         print("Clicked login button. Filling credentials...")
     
         # Wait for login form fields and fill them
-        username_field_selector = "input#modal_email"
-        password_field_selector = "input#modal_password"
-        submit_button_selector = "button#modal_login_submit"
+        username_field_selector = SELECTORS["username_field"]
+        password_field_selector = SELECTORS["password_field"]
+        submit_button_selector = SELECTORS["login_submit"]
 
         page.locator(username_field_selector).press_sequentially(username, delay=50)
         page.locator(password_field_selector).press_sequentially(password, delay=50)
@@ -98,7 +104,7 @@ def login_to_internshala(page, username, password):
         # Wait for navigation or a success indicator (e.g., user dashboard element)
         # Waiting for the login modal to disappear indicates success or page reload
         print("Waiting up to 90 seconds for login to complete (Solve reCAPTCHA manually if prompted)...")
-        page.wait_for_selector("#login-modal", state="hidden", timeout=1600000)
+        page.wait_for_selector(SELECTORS["login_modal_hidden"], state="hidden", timeout=1600000)
         page.wait_for_load_state("domcontentloaded")
         print("Login successful.")
         return True
@@ -126,7 +132,7 @@ def search_and_filter_internships(page):
 
         print("Waiting for internship listings to load...")
         # Wait for a common element that indicates listings are present
-        page.wait_for_selector("div.individual_internship", timeout=20000)
+        page.wait_for_selector(SELECTORS["internship_listings"], timeout=20000)
         print("Internship listings page loaded.")
         return True
     except PlaywrightTimeoutError as e:
@@ -147,7 +153,7 @@ def apply_one_click_internships(page, keywords, dry_run=False):
     """
     print(f"\nScanning listings on matching preferences page for one-click apply (popup flow)...")
     applied_records = []
-    listings = page.query_selector_all("div.individual_internship")
+    listings = page.query_selector_all(SELECTORS["internship_listings"])
 
     if not listings:
         print("No listings found on the matching preferences page.")
@@ -158,9 +164,9 @@ def apply_one_click_internships(page, keywords, dry_run=False):
     
     for i, listing in enumerate(listings, start=1):
         try:
-            company_el = listing.query_selector("p.company-name, div.company_name a")
-            role_el = listing.query_selector("h3.job-internship-name a, div.internship_heading_title")
-            listing_url_el = listing.query_selector("h3.job-internship-name a, div.internship_heading_title a")
+            company_el = listing.query_selector(SELECTORS["company_name"])
+            role_el = listing.query_selector(SELECTORS["role_name"])
+            listing_url_el = listing.query_selector(SELECTORS["listing_url"])
 
             if not (company_el and role_el and listing_url_el):
                 continue
@@ -187,7 +193,7 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             page.goto(listing_url, timeout=20000)
 
             # Step 2: Find the "Apply now" button
-            apply_now_btn = page.locator("button#make_new_application, button:has-text('Apply now'), a:has-text('Apply now')").first
+            apply_now_btn = page.locator(SELECTORS["apply_now_btn"]).first
             try:
                 apply_now_btn.wait_for(state="visible", timeout=10000)
             except PlaywrightTimeoutError:
@@ -201,7 +207,7 @@ def apply_one_click_internships(page, keywords, dry_run=False):
                 print(f"Dry run: Would click 'Apply now' on {listing_url}.")
 
             # Step 2.5: Sometimes there forms a "Proceed to application" popup first
-            proceed_btn = page.locator("button#continue_button, a#continue_button, button:has-text('Proceed'), a:has-text('Proceed')").first
+            proceed_btn = page.locator(SELECTORS["proceed_btn"]).first
             try:
                 proceed_btn.wait_for(state="visible", timeout=5000)
                 if not dry_run:
@@ -212,7 +218,7 @@ def apply_one_click_internships(page, keywords, dry_run=False):
                 pass
 
             # Step 3: Wait for the Submit Application flow (might be on next page or modal)
-            submit_btn = page.locator("button#submit, input#submit, button.submit_button_to_show, button:has-text('Submit'), input[type='submit']").first
+            submit_btn = page.locator(SELECTORS["submit_btn"]).first
             try:
                 submit_btn.wait_for(state="visible", timeout=10000)
                 if not dry_run:
