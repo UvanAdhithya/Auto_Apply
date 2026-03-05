@@ -68,8 +68,8 @@ def robust_wait_and_click(page, selector_key, timeout=10000, force=False):
         element.wait_for(state="visible", timeout=timeout)
         element.click(timeout=timeout, force=force)
         return True
-    except PlaywrightTimeoutError:
-        print(f"Timeout waiting for '{selector_key}'. Triggering self-healing AI agent...")
+    except Exception as e:
+        print(f"Failed to find or click '{selector_key}' (Error: {type(e).__name__}). Triggering self-healing AI agent...")
         try:
             import agent
             # Take a screenshot before healing just in case
@@ -223,14 +223,11 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             page.goto(listing_url, timeout=20000)
 
             # Step 2: Click the "Apply now" button (with Self-Healing Agent wrapper)
-            if not dry_run:
-                print("Applying: clicking 'Apply now'...")
-                success = robust_wait_and_click(page, "apply_now_btn", force=True)
-                if not success:
-                    print(f"Listing {i}: 'Apply now' button ultimately not found. Skipping.")
-                    continue
-            else:
-                print(f"Dry run: Would click 'Apply now' on {listing_url}.")
+            print("Applying: clicking 'Apply now' (or simulating opening the modal)...")
+            success = robust_wait_and_click(page, "apply_now_btn", force=True)
+            if not success:
+                print(f"Listing {i}: 'Apply now' button ultimately not found. Skipping.")
+                continue
 
             # Steps 2.5 and 3: Proceed and Submit flow
             if not dry_run:
