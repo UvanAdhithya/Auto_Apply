@@ -73,10 +73,11 @@ def robust_wait_and_click(page, selector_key, timeout=10000, force=False):
         try:
             import agent
             # Take a screenshot before healing just in case
-            page.screenshot(path=f"healing_trigger_{selector_key}.png")
+            screenshot_path = os.path.join(os.getcwd(), f"healing_trigger_{selector_key}.png")
+            page.screenshot(path=screenshot_path)
             
             # Send HTML to the CrewAI agents
-            agent.heal_selectors(page.content())
+            agent.heal_selectors(page.content(), screenshot_path=screenshot_path)
             
             # Reload fresh SELECTORS from the YAML file that the agent just fixed
             with open(SELECTORS_FILE, "r") as f:
