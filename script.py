@@ -232,28 +232,28 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             else:
                 print(f"Dry run: Would click 'Apply now' on {listing_url}.")
 
-            # Step 2.5: Sometimes there forms a "Proceed to application" popup first
-            proceed_btn = page.locator(SELECTORS["proceed_btn"]).first
-            try:
-                proceed_btn.wait_for(state="visible", timeout=5000)
-                if not dry_run:
+            # Steps 2.5 and 3: Proceed and Submit flow
+            if not dry_run:
+                # Step 2.5: Sometimes there forms a "Proceed to application" popup first
+                proceed_btn = page.locator(SELECTORS["proceed_btn"]).first
+                try:
+                    proceed_btn.wait_for(state="visible", timeout=5000)
                     print("Clicking 'Proceed to application'...")
                     proceed_btn.click(timeout=10000, force=True)
-            except PlaywrightTimeoutError:
-                # It's fine if there is no "Proceed" button, might go straight to Submit
-                pass
+                except PlaywrightTimeoutError:
+                    # It's fine if there is no "Proceed" button, might go straight to Submit
+                    pass
 
-            # Step 3: Wait for the Submit Application flow (might be on next page or modal)
-            submit_btn = page.locator(SELECTORS["submit_btn"]).first
-            try:
-                submit_btn.wait_for(state="visible", timeout=10000)
-                if not dry_run:
+                # Step 3: Wait for the Submit Application flow (might be on next page or modal)
+                submit_btn = page.locator(SELECTORS["submit_btn"]).first
+                try:
+                    submit_btn.wait_for(state="visible", timeout=10000)
                     submit_btn.click(timeout=10000, force=True)
-                else:
-                    print(f"Dry run: Would click Submit for listing {i}.")
-            except PlaywrightTimeoutError:
-                print(f"Listing {i}: Submit button not found after clicking Apply. Skipping.")
-                continue
+                except PlaywrightTimeoutError:
+                    print(f"Listing {i}: Submit button not found after clicking Apply. Skipping.")
+                    continue
+            else:
+                print(f"Dry run: Simulated clicking Proceed and Submit for listing {i}.")
 
             # Optional: wait for a lightweight confirmation or network idle
             if not dry_run:
