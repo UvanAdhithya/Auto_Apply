@@ -71,6 +71,111 @@ selectors:
   submit_button: "button#submit"
 ```
 
+---
+
+## Where to Start: CrewAI Code Architecture
+
+If you want to build this today, **CrewAI** is the easiest framework. It allows you to define "Agents" with specific roles and "Tasks" they must accomplish. Here is the blueprint for your `agent.py` file:
+
+### Step 1: Install Dependencies
+```bash
+pip install crewai langchain-openai playwright pyyaml
+```
+
+### Step 2: Extract Selectors
+Before you write any Agent code, you **must** go into `script.py` and replace every single hardcoded string (like `"button#submit"`) with a configuration load:
+```python
+import yaml
+with open("selectors.yaml", "r") as f:
+    config = yaml.safe_load(f)
+
+# Old: page.click("button#submit")
+# New: 
+page.click(config['selectors']['submit_button'])
+```
+
+### Step 3: Define Your AI Crew (`agent.py`)
+This is the core of your new shippable product.
+
+```python
+from crewai import Agent, Task, Crew, Process
+from langchain_openai import ChatOpenAI
+import yaml
+
+# 1. Provide the LLM (e.g., GPT-4o or Claude 3.5 Sonnet)
+llm = ChatOpenAI(model="gpt-4o", temperature=0)
+
+# 2. Define the Auditor Agent (The Inspector)
+auditor = Agent(
+    role="Web Automation QA Engineer",
+    goal="Ensure the Internshala DOM matches the configured selectors in selectors.yaml",
+    backstory="An expert QA engineer who evaluates raw HTML to find the correct CSS selectors for buttons and forms.",
+    verbose=True,
+    allow_delegation=False,
+    llm=llm
+)
+
+# 3. Define the Healer Agent (The Developer)
+healer = Agent(
+    role="Senior Python Automation Engineer",
+    goal="Rewrite the selectors.yaml file to fix any broken Playwright locators.",
+    backstory="A developer who takes bug reports from QA and updates the configuration file with perfectly accurate Playwright CSS selectors.",
+    verbose=True,
+    allow_delegation=False,
+    llm=llm
+)
+
+# 4. Define the Tasks
+audit_task = Task(
+    description="""
+    Here is a chunk of the current Internshala HTML: {html_dump}
+    Here are our current expected selectors: {current_yaml}
+    
+    Task: Evaluate if the expected selectors still exist in the HTML dump. 
+    Output exactly which selectors are missing or broken, and provide the correct ones.
+    """,
+    expected_output="A list of broken selectors and their new, corrected values.",
+    agent=auditor
+)
+
+heal_task = Task(
+    description="""
+    Based on the QA Auditor's report, rewrite the `selectors.yaml` file so the automation can resume.
+    Provide the raw YAML string as your final output.
+    """,
+    expected_output="The completely rewritten and fully functioning YAML configuration string.",
+    agent=healer
+)
+
+# 5. Assemble the Crew and Run before the main script
+def run_self_healing_check(html_snippet):
+    with open("selectors.yaml", "r") as f:
+        current_yaml = f.read()
+
+    crew = Crew(
+        agents=[auditor, healer],
+        tasks=[audit_task, heal_task],
+        process=Process.sequential
+    )
+
+    # Fire the agents!
+    result = crew.kickoff(inputs={'html_dump': html_snippet, 'current_yaml': current_yaml})
+    
+    # Save the Healer's output to the file
+    with open("selectors.yaml", "w") as f:
+        f.write(result)
+    
+    print("Self-Healing Complete! Now executing script.py...")
+```
+
+### Step 4: Connecting it to `script.py`
+In your `script.py`, if a `PlaywrightTimeoutError` happens on, say, the application page:
+1. Catch the exception.
+2. Dump `page.content()` (the HTML).
+3. Call `run_self_healing_check(html_snippet)`.
+4. Retry the click!
+If the Healer did its job, the click will now succeed.
+
 ## Summary of the User Experience
 1. User clicks "Start Applying".
 2. The app says: *"Verifying Internshala site structure..."*
