@@ -25,7 +25,7 @@ The self-healing workflow utilizes a 3-Phase Agentic Loop:
 ### 1. Prerequisites
 - Python 3.8+
 - [Playwright](https://playwright.dev/python/) installed (`playwright install`)
-- An OpenAI API Key (needed for the self-healing CrewAI agents).
+- A Gemini API Key (needed for the self-healing CrewAI agents).
 
 ### 2. Environment Setup
 Create a virtual environment and install the required packages:
@@ -43,7 +43,7 @@ Create a `.env` file in the root directory and add your credentials:
 ```ini
 INTERNSHALA_USERNAME="your_email@example.com"
 INTERNSHALA_PASSWORD="your_secret_password"
-OPENAI_API_KEY="sk-your-openai-api-key"
+GEMINI_API_KEY="AIzaSy...your-gemini-key"
 ```
 
 You can customize the job search keywords directly in `script.py`. 
