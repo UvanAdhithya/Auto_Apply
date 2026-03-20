@@ -3,17 +3,17 @@ import yaml
 import base64
 from pathlib import Path
 from crewai import Agent, Task, Crew, Process
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 
-# Load environment variables (Make sure GEMINI_API_KEY is in .env)
+# Load environment variables (Make sure OPENAI_API_KEY is in .env)
 load_dotenv()
 
 SELECTORS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "selectors.yaml")
 
 # 1. Provide the LLMs
-llm_fast = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
-llm_smart = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
+llm_fast = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm_smart = ChatOpenAI(model="gpt-4o", temperature=0)
 
 # --- Define Agents ---
 
