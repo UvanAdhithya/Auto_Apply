@@ -30,6 +30,8 @@ KEYWORDS = [
     "Backend"
 ]
 
+UNHEALABLE_SELECTORS = set()
+
 # --- Helper Functions ---
 
 def load_credentials():
@@ -69,6 +71,10 @@ def robust_wait_and_click(page, selector_key, timeout=10000, force=False):
         element.click(timeout=timeout, force=force)
         return True
     except Exception as e:
+        if selector_key in UNHEALABLE_SELECTORS:
+            print(f"Skipping AI heal for '{selector_key}' to save credits (previously marked as unhealable).")
+            return False
+
         print(f"Failed to find or click '{selector_key}' (Error: {type(e).__name__}). Triggering self-healing AI agent...")
         try:
             import agent
@@ -77,8 +83,13 @@ def robust_wait_and_click(page, selector_key, timeout=10000, force=False):
             page.screenshot(path=screenshot_path)
             
             # Send HTML to the CrewAI agents
-            agent.heal_selectors(page.content(), screenshot_path=screenshot_path)
+            is_healed = agent.heal_selectors(page.content(), screenshot_path=screenshot_path)
             
+            if not is_healed:
+                print(f"Self-healing agent failed to repair '{selector_key}'. Marking as unhealable for this run.")
+                UNHEALABLE_SELECTORS.add(selector_key)
+                return False
+                
             # Reload fresh SELECTORS from the YAML file that the agent just fixed
             with open(SELECTORS_FILE, "r") as f:
                 SELECTORS.update(yaml.safe_load(f)["selectors"])
@@ -91,6 +102,7 @@ def robust_wait_and_click(page, selector_key, timeout=10000, force=False):
             return True
         except Exception as e:
             print(f"Self-healing failed for '{selector_key}': {e}")
+            UNHEALABLE_SELECTORS.add(selector_key)
             return False
 
 
@@ -151,7 +163,7 @@ def search_and_filter_internships(page):
     """Navigates to the internships search page and applies keyword filters."""
     print(f"Navigating to internships search page: {INTERNSHIPS_SEARCH_URL}")
     try:
-        page.goto(INTERNSHIPS_SEARCH_URL, timeout=20000)
+        page.goto(INTERNSHIPS_SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
 
         # Combine keywords for a general search or apply them sequentially if there's a specific mechanisms
         # For simplicity, we'll try to submit a multi-keyword search query if possible,
@@ -220,33 +232,37 @@ def apply_one_click_internships(page, keywords, dry_run=False):
 
         try:
             # Step 1: Navigate directly to the listing details page
-            page.goto(listing_url, timeout=20000)
+            page.goto(listing_url, timeout=30000, wait_until="domcontentloaded")
+            
+            # Allow JS to fully hydrate the page before clicking to prevent ghost clicks
+            page.wait_for_timeout(3000)
 
-            # Step 2: Click the "Apply now" button (with Self-Healing Agent wrapper)
-            print("Applying: clicking 'Apply now' (or simulating opening the modal)...")
-            success = robust_wait_and_click(page, "apply_now_btn", force=True)
+            # Step 2: Click "Apply Now" to open the application modal.
+            print("Applying: clicking 'Apply now' to open the application modal...")
+            success = robust_wait_and_click(page, "apply_now_btn", force=False)
             if not success:
                 print(f"Listing {i}: 'Apply now' button ultimately not found. Skipping.")
                 continue
 
-            # Steps 2.5 and 3: Proceed and Submit flow
+            # Step 2.5: Sometimes Internshala shows a "Proceed to application" popup
             if not dry_run:
-                # Step 2.5: Sometimes there forms a "Proceed to application" popup first
                 proceed_btn = page.locator(SELECTORS["proceed_btn"]).first
                 try:
-                    proceed_btn.wait_for(state="visible", timeout=5000)
+                    proceed_btn.wait_for(state="visible", timeout=3000)
                     print("Clicking 'Proceed to application'...")
-                    proceed_btn.click(timeout=10000, force=True)
-                except PlaywrightTimeoutError:
-                    # It's fine if there is no "Proceed" button, might go straight to Submit
+                    proceed_btn.click(timeout=5000, force=True)
+                except Exception:
+                    # Ignore if the proceed button isn't there, meaning we go straight to the modal
                     pass
 
-                # Step 3: Wait for the Submit Application flow (might be on next page or modal)
-                submit_btn = page.locator(SELECTORS["submit_btn"]).first
-                try:
-                    submit_btn.wait_for(state="visible", timeout=10000)
-                    submit_btn.click(timeout=10000, force=True)
-                except PlaywrightTimeoutError:
+            # Step 3: Wait for the Submit Application Form
+            if not dry_run:
+                # Give the modal animation time to slide in
+                page.wait_for_timeout(2000)
+                
+                print("Waiting for 'Submit' button in the application form...")
+                success = robust_wait_and_click(page, "submit_btn", force=True)
+                if not success:
                     print(f"Listing {i}: Submit button not found after clicking Apply. Skipping.")
                     continue
             else:

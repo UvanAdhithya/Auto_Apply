@@ -4,7 +4,13 @@ import base64
 from pathlib import Path
 from crewai import Agent, Task, Crew, Process
 from langchain_openai import ChatOpenAI
+from bs4 import BeautifulSoup, Comment
+import re
 from dotenv import load_dotenv
+import os
+
+# Disable the buggy CrewAI telemetry server unconditionally to prevent 30s connection timeouts
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
 # Load environment variables (Make sure OPENAI_API_KEY is in .env)
 load_dotenv()
@@ -84,13 +90,36 @@ def get_tasks(auditor, healer):
 
 # --- Orchestration ---
 
+def clean_html(html_content):
+    """Strips massive bloat tags to ensure the <body> fits inside the LLM context."""
+    soup = BeautifulSoup(html_content, "html.parser")
+    # Remove script, style, svg, and head tags to save tokens
+    for tag in soup(["script", "style", "svg", "path", "head", "noscript", "meta", "link", "iframe"]):
+        tag.decompose()
+    
+    # Remove HTML comments
+    for element in soup.find_all(string=lambda text: isinstance(text, Comment)):
+        element.extract()
+        
+    cleaned_html = str(soup)
+    # Remove excessive blank space
+    cleaned_html = re.sub(r'\s+', ' ', cleaned_html)
+    return cleaned_html
+
 # 5. Assemble the Crew and Run
 def heal_selectors(html_snippet, screenshot_path=None):
     """
     Called by script.py when a timeout error occurs. 
     Triggers the LLM self-healing workflow.
     """
-    print("Initiating Self-Healing Protocol (Phase 1: Fast DOM pass with gpt-4o-mini)...")
+    # Clean the HTML to ensure the actual visible elements reach the LLM
+    html_snippet = clean_html(html_snippet)
+    
+    # Dump the cleaned HTML to disk so I (Antigravity) can read exactly what the AI sees
+    with open("agent_dom_dump.html", "w", encoding="utf-8") as f:
+        f.write(html_snippet)
+    
+    print(f"Initiating Self-Healing Protocol (Phase 1: Fast DOM pass)... (DOM optimally compressed to {len(html_snippet)} chars)")
     
     with open(SELECTORS_FILE, "r") as f:
         current_yaml = f.read()
@@ -104,44 +133,45 @@ def heal_selectors(html_snippet, screenshot_path=None):
         process=Process.sequential
     )
 
-    result = crew.kickoff(inputs={
-        'html_dump': html_snippet[:10000], 
-        'current_yaml': current_yaml
-    })
+    # Execute Phase 1
+    try:
+        result = crew.kickoff(inputs={
+            'html_dump': html_snippet[:100000],  # Send the full compressed DOM snapshot
+            'current_yaml': current_yaml
+        })
+    except Exception as e:
+        print(f"Error during fast pass kickoff: {e}")
+        result = None # Ensure result is defined for the next check
     
-    final_output = str(result.raw).strip()
+    final_output = str(result.raw).strip() if result else "FAILURE"
 
     # Fallback to smart model / vision strategy if fast pass fails
     if "FAILURE" in final_output or "selectors:" not in final_output:
         print("\nFast pass returned low confidence or failed. Triggering Smart Fallback (gpt-4o)...")
-        
-        vision_context = ""
-        if screenshot_path and os.path.exists(screenshot_path):
-            print(f"(Screenshot saved at {screenshot_path} available for vision fallback)")
-            with open(screenshot_path, "rb") as img_file:
-                b64_string = base64.b64encode(img_file.read()).decode("utf-8")
-                # Using markdown image syntax commonly accepted by vision models via Langchain wrappers
-                vision_context = f"\n\nHere is a screenshot of the page currently:\n![Screenshot](data:image/png;base64,{b64_string})"
-            
+
+        print("\n(Running smart fallback with gpt-4o for better DOM reasoning without vision due to token limits...)")
         auditor_smart, healer_smart = get_agents(llm_smart)
         tasks_smart = get_tasks(auditor_smart, healer_smart)
         
-        # Inject the vision context into the auditor's description
-        tasks_smart[0].description += vision_context
-        
-        crew_smart = Crew(
-            agents=[auditor_smart, healer_smart],
+        print("Initiating Self-Healing Protocol (Phase 2: Smart LLM fallback)...")
+        fallback_crew = Crew(
+            agents=[auditor_smart, healer_smart], # Use both smart agents for the fallback
             tasks=tasks_smart,
-            process=Process.sequential
+            process=Process.sequential,
+            verbose=True
         )
         
-        result = crew_smart.kickoff(inputs={
-            'html_dump': html_snippet[:20000], # Pass more context to the smarter model
-            'current_yaml': current_yaml
-        })
-        final_output = str(result.raw).strip()
+        try:
+            result = fallback_crew.kickoff(inputs={
+                'html_dump': html_snippet[:100000], # Pass the full valid DOM to the smarter model
+                'current_yaml': current_yaml
+            })
+        except Exception as e:
+            print(f"Error during smart fallback kickoff: {e}")
+            result = None # Ensure result is defined for the next check
+        final_output = str(result.raw).strip() if result else "FAILURE"
 
-    # Save the Healer's output to the file (removing markdown blocks if LLM adds them)
+    # Clean any markdown wrapping before evaluation
     if final_output.startswith("```yaml"):
         final_output = final_output[7:]
     if final_output.startswith("```"):
@@ -150,10 +180,15 @@ def heal_selectors(html_snippet, screenshot_path=None):
          final_output = final_output[:-3]
     final_output = final_output.strip()
 
+    if final_output == "FAILURE" or "selectors:" not in final_output:
+        print("\nSelf-Healing Agent could not find a valid selector layout (FAILURE or invalid output format).")
+        return False
+
     with open(SELECTORS_FILE, "w") as f:
         f.write(final_output)
     
     print("\nSelf-Healing Complete! selectors.yaml has been updated.")
+    return True
 
 if __name__ == "__main__":
     print("Agent module loaded. Testing agent compilation...")
