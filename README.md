@@ -20,6 +20,14 @@ The self-healing workflow utilizes a 3-Phase Agentic Loop:
 - **Phase 2: The Healer**: Acts as a developer. Based on the Auditor's analysis, it rewrites `selectors.yaml` with the newly valid CSS selectors.
 - **Phase 3: The Executor**: Resumes the mass-application automation seamlessly using the corrected selectors.
 
+### How it Works (Under the Hood)
+
+To make LLM-based web automation viable on platforms like Internshala, several aggressive optimizations are implemented:
+1. **DOM Micro-Cleaning**: Raw Internshala application pages often exceed 300,000 characters. Before invoking the AI Agent, BeautifulSoup strips all `<script>`, `<style>`, `<svg>`, and `<head>` tags to cleanly compress the structure down to ~90,000 characters, ensuring it fits snugly within `gpt-4o-mini`'s maximum context limits.
+2. **The `UNHEALABLE_SELECTORS` Cache**: To prevent bankrupting user OpenAI credits during loops, if the Agent determines that a selector is genuinely missing from the DOM (e.g. you have already applied to a listing, or the modal is fundamentally missing), it outputs `FAILURE`. The script caches this result and instantly skips similar AI calls for the remainder of the session.
+3. **JS Hydration Race Condition Bypasses**: The automation natively intercepts Playwright's default actionability checks, implementing hard-delays over dynamic application modals to ensure that React/Angular click listeners are completely bound before attempting simulated user-input.
+4. **Adaptive Context String Evaluators**: Because LLM structured outputs (like YAML format requirements) can drift, the self-healing orchestrator relies on strict python-level parsing to extract the YAML dictionary blocks rather than soft string matching, preventing verbose AI audit reports from crashing the `CrewAI` sequence.
+
 ## Setup & Installation
 
 ### 1. Prerequisites
