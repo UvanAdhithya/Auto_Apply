@@ -12,3 +12,7 @@ selectors:
   apply_now_btn: "button:has-text('Apply now'), a:has-text('Apply now')"
   proceed_btn: "button:has-text('Proceed'), a:has-text('Proceed')"
   submit_btn: "button#submit, input#submit, button.submit_button_to_show, button:has-text('Submit'), input[type='submit']"
+  preferences_checkbox: "input#matching_preference"
+  search_input: "input#keywords"
+  search_btn: "button#search"
+  overlay_close: ".close_action, i.ic-24-cross, .close, span:has-text('×')"

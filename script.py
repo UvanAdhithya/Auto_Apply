@@ -18,9 +18,9 @@ with open(SELECTORS_FILE, "r") as f:
     SELECTORS = yaml.safe_load(f)["selectors"]
 
 INTERNSHALA_URL = "https://internshala.com"
-INTERNSHIPS_SEARCH_URL = "https://internshala.com/internships/matching-preferences/"
+INTERNSHIPS_SEARCH_URL = "https://internshala.com/internships/"
 
-# Keywords to search for internships
+# Keywords to search for internships (Default Fallback)
 KEYWORDS = [
     "AI",
     "ML",
@@ -159,18 +159,41 @@ def login_to_internshala(page, username, password):
         return False
 
 
-def search_and_filter_internships(page):
+def search_and_filter_internships(page, search_keywords_str=None):
     """Navigates to the internships search page and applies keyword filters."""
     print(f"Navigating to internships search page: {INTERNSHIPS_SEARCH_URL}")
     try:
         page.goto(INTERNSHIPS_SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
 
-        # Combine keywords for a general search or apply them sequentially if there's a specific mechanisms
-        # For simplicity, we'll try to submit a multi-keyword search query if possible,
-        # or simulate a search. Inspecting Internshala's search input is key here.
-        # If there is a single search input that accepts multiple keywords, use that.
-        # Otherwise, this part might need complex iteration.
-        # Let's assume a general search input and then potentially filtering.
+        if search_keywords_str:
+            print(f"Applying search keywords: {search_keywords_str}")
+            try:
+                # Dismiss overlay popups if they exist (e.g. subscription alerts)
+                try:
+                    close_btn = page.locator(SELECTORS.get("overlay_close", ".close_action")).first
+                    if close_btn.is_visible():
+                        close_btn.click(timeout=1000)
+                except PlaywrightTimeoutError:
+                    pass
+                
+                # Uncheck preferences checkbox to enable keyword field
+                checkbox = page.locator(SELECTORS["preferences_checkbox"])
+                if checkbox.is_visible() and checkbox.is_checked():
+                    print("Unchecking 'As per my preferences'...")
+                    checkbox.uncheck(force=True)
+                    page.wait_for_timeout(1000)
+                    
+                # Fill the search field directly
+                print("Filling search input...")
+                page.locator(SELECTORS["search_input"]).fill(search_keywords_str, force=True)
+                page.locator(SELECTORS["search_btn"]).click(force=True)
+                
+                # Wait for search navigation
+                page.wait_for_timeout(4000)
+            except Exception as e:
+                print(f"Warning during custom keyword search: {e}")
+        else:
+            print("No specific keywords provided; relying on default saved user preferences if redirected.")
 
         print("Waiting for internship listings to load...")
         # Wait for a common element that indicates listings are present
@@ -429,9 +452,27 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Simulate actions without applying.")
     parser.add_argument("--headed", action="store_true", help="Run headed to solve CAPTCHA manually.")
+    parser.add_argument("--keywords", type=str, help="Comma-separated keywords to search for.")
     args = parser.parse_args()
     dry_run = bool(args.dry_run)
     headed = bool(args.headed)
+
+    # Prompt user for search keywords
+    if args.keywords:
+        search_keywords_str = args.keywords
+    else:
+        try:
+            print("\n" + "="*50)
+            print("Internshala Automation Bot")
+            print("="*50)
+            print(f"Default KEYWORDS: {', '.join(KEYWORDS)}")
+            user_input = input("Enter keywords to search (comma-separated), or press Enter to use defaults: ").strip()
+            if user_input:
+                search_keywords_str = user_input
+            else:
+                search_keywords_str = ', '.join(KEYWORDS)
+        except EOFError:
+            search_keywords_str = ', '.join(KEYWORDS)
 
     username, password = load_credentials()
     with sync_playwright() as p:
@@ -450,7 +491,7 @@ def main():
             context.close()
             return
 
-        if not search_and_filter_internships(page):
+        if not search_and_filter_internships(page, search_keywords_str):
             print("Aborting due to listings load failure.")
             context.close()
             return
