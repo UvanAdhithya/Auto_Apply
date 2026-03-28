@@ -205,6 +205,28 @@ def heal_selectors(html_snippet, screenshot_path=None, broken_keys=None):
     print("\nSelf-Healing Complete! selectors.yaml has been updated.")
     return True
 
+def summarize_employer_message(company, role, messages_text):
+    """Uses LLM to summarize a chat thread from an employer."""
+    prompt = (
+        f"You are an assistant parsing an incoming chat from an employer on Internshala.\n"
+        f"Employer Company: {company}\n"
+        f"Role Applied For: {role}\n\n"
+        f"Here is the dialogue/message history:\n{messages_text}\n\n"
+        "Please extract and summarize exactly:\n"
+        "1. Who is it (recruiter name or company)\n"
+        "2. What role it is for\n"
+        "3. What they want from the user (e.g., shortlisting, assignment, interview availability).\n"
+        "Keep it concise, suitable for a WhatsApp alert."
+    )
+    
+    try:
+        # We can just use the smart LLM
+        response = llm_smart.invoke(prompt)
+        return response.content.strip()
+    except Exception as e:
+        print(f"Error summarising message: {e}")
+        return f"New message from {company} regarding {role}. See Internshala for details."
+
 if __name__ == "__main__":
     print("Agent module loaded. Testing agent compilation...")
     print("Agents assembled and ready.")

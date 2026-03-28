@@ -448,31 +448,132 @@ def apply_one_click_internships(page, keywords, dry_run=False):
     return applied_records
 
 
+def check_internshala_messages(page, dry_run=False):
+    """
+    Checks the Internshala /chat/c page for new messages.
+    If an unread message is from a company in our applied log,
+    it reads the thread, uses the agent to summarize "who, what role, what they want",
+    and sends a WhatsApp message using Twilio.
+    """
+    print("\nNavigating to Internshala messages...")
+    page.goto(INTERNSHALA_URL + "/chat/c")
+    page.wait_for_timeout(3000)
+
+    # Load applied companies from log
+    applied_companies = {}
+    if LOG_FILE.exists():
+        with open(LOG_FILE, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("company") and row.get("role"):
+                    applied_companies[row["company"].lower().strip()] = row["role"]
+
+    print(f"Loaded {len(applied_companies)} applied companies from log.")
+    
+    try:
+        page.wait_for_selector(SELECTORS.get("chat_list_item", "div.chat_container"), timeout=10000)
+    except PlaywrightTimeoutError:
+        print("Could not find chat list or no messages exist.")
+        return
+
+    chat_items = page.locator(SELECTORS.get("chat_list_item", "div.chat_container"))
+    count = chat_items.count()
+    print(f"Found {count} chat conversations.")
+
+    for i in range(count):
+        item = chat_items.nth(i)
+        
+        # Check if unread badge exists
+        unread_badge = item.locator(SELECTORS.get("chat_item_unread", ".unread_count"))
+        is_unread = unread_badge.count() > 0 and unread_badge.first.is_visible()
+        
+        if not is_unread and not dry_run:
+            continue
+            
+        company_el = item.locator(SELECTORS.get("chat_item_company", ".chat_with_name"))
+        if company_el.count() == 0:
+            continue
+            
+        company_name = company_el.first.inner_text().strip()
+        print(f"[{'UNREAD' if is_unread else 'READ'}] message from: {company_name}")
+        
+        company_name_lower = company_name.lower()
+        matched_role = None
+        for applied_company, role in applied_companies.items():
+            if applied_company in company_name_lower or company_name_lower in applied_company:
+                matched_role = role
+                break
+                
+        if matched_role:
+            print(f"Match found! Company: {company_name}, Role: {matched_role}")
+            item.click()
+            page.wait_for_timeout(2000)
+            
+            # Extract messages
+            messages_loc = page.locator(SELECTORS.get("chat_message_bubble", ".message_content"))
+            messages_text = []
+            for j in range(messages_loc.count()):
+                messages_text.append(messages_loc.nth(j).inner_text().strip())
+                
+            full_thread = "\n---\n".join(messages_text[-5:])
+            
+            import agent
+            summary = agent.summarize_employer_message(company_name, matched_role, full_thread)
+            print(f"\n--- AI Summary ---\n{summary}\n------------------\n")
+            
+            if not dry_run:
+                try:
+                    from twilio.rest import Client
+                    account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+                    auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+                    from_whatsapp = os.environ.get("TWILIO_WHATSAPP_NUMBER")
+                    to_whatsapp = os.environ.get("USER_WHATSAPP_NUMBER")
+                    
+                    if account_sid and auth_token and from_whatsapp and to_whatsapp:
+                        client = Client(account_sid, auth_token)
+                        msg = client.messages.create(
+                            body=f"🚨 *Internshala Alert*\n\n{summary}",
+                            from_=from_whatsapp,
+                            to=to_whatsapp
+                        )
+                        print(f"WhatsApp message sent! SID: {msg.sid}")
+                    else:
+                        print("Twilio credentials missing in .env. Could not send WhatsApp notification.")
+                except ImportError:
+                    print("Twilio library not installed. Cannot send WhatsApp message.")
+                except Exception as e:
+                    print(f"Failed to send WhatsApp message: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Simulate actions without applying.")
     parser.add_argument("--headed", action="store_true", help="Run headed to solve CAPTCHA manually.")
     parser.add_argument("--keywords", type=str, help="Comma-separated keywords to search for.")
+    parser.add_argument("--check-messages", action="store_true", help="Check Internshala messages independently.")
     args = parser.parse_args()
     dry_run = bool(args.dry_run)
     headed = bool(args.headed)
+    check_messages_flag = bool(args.check_messages)
 
+    search_keywords_str = ""
     # Prompt user for search keywords
-    if args.keywords:
-        search_keywords_str = args.keywords
-    else:
-        try:
-            print("\n" + "="*50)
-            print("Internshala Automation Bot")
-            print("="*50)
-            print(f"Default KEYWORDS: {', '.join(KEYWORDS)}")
-            user_input = input("Enter keywords to search (comma-separated), or press Enter to use defaults: ").strip()
-            if user_input:
-                search_keywords_str = user_input
-            else:
+    if not check_messages_flag:
+        if args.keywords:
+            search_keywords_str = args.keywords
+        else:
+            try:
+                print("\n" + "="*50)
+                print("Internshala Automation Bot")
+                print("="*50)
+                print(f"Default KEYWORDS: {', '.join(KEYWORDS)}")
+                user_input = input("Enter keywords to search (comma-separated), or press Enter to use defaults: ").strip()
+                if user_input:
+                    search_keywords_str = user_input
+                else:
+                    search_keywords_str = ', '.join(KEYWORDS)
+            except EOFError:
                 search_keywords_str = ', '.join(KEYWORDS)
-        except EOFError:
-            search_keywords_str = ', '.join(KEYWORDS)
 
     username, password = load_credentials()
     with sync_playwright() as p:
@@ -488,6 +589,11 @@ def main():
         login_ok = login_to_internshala(page, username, password)
         if not login_ok:
             print("Aborting due to login failure.")
+            context.close()
+            return
+
+        if check_messages_flag:
+            check_internshala_messages(page, dry_run=dry_run)
             context.close()
             return
 

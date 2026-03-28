@@ -16,3 +16,7 @@ selectors:
   search_input: "input#keywords"
   search_btn: "button#search"
   overlay_close: ".close_action, i.ic-24-cross, .close, span:has-text('×')"
+  chat_list_item: "div.chat_container, li.chat_list_item"
+  chat_item_company: ".chat_with_name, .company_name_text"
+  chat_item_unread: ".unread_count, .new_badge"
+  chat_message_bubble: ".message_content, .text-message"
