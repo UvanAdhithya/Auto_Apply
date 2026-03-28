@@ -9,7 +9,9 @@ What makes this project truly unique is its **Self-Healing Agentic Workflow**. W
 ## Features
 
 1. **Automated Search & Apply**: Automatically searches for your desired keywords (e.g., AI, ML, SWE) and applies to matched internships.
-2. **Self-Healing Selectors**: If Internshala updates their website and a button's ID or Class changes, the script catches the `TimeoutError`. A CrewAI Agent steps in, reads the active DOM, fixes the selector in `selectors.yaml`, and resumes the script.
+2. **Comprehensive Self-Healing**: Web layouts break constantly. This bot handles failures at two layers:
+   - **Data Extraction**: If Internshala updates the listing layout, the bot calculates the extraction failure rate across all listings. If the failure rate exceeds 50%, it triggers a bulk-heal on all broken extraction selectors.
+   - **Click/Interaction**: If a button's ID or Class changes and causes a Playwright `TimeoutError`, a CrewAI Agent steps in, reads the active DOM, fixes the selector in `selectors.yaml`, and instantly resumes the script.
 3. **Application Logging**: Keeps a JSON log file of all successful applications including company name, role, and the application URL so you can track your progress.
 4. **Dry Run Mode**: Safely test your automation setup without actually submitting an application to any company.
 
@@ -24,9 +26,10 @@ The self-healing workflow utilizes a 3-Phase Agentic Loop:
 
 To make LLM-based web automation viable on platforms like Internshala, several aggressive optimizations are implemented:
 1. **DOM Micro-Cleaning**: Raw Internshala application pages often exceed 300,000 characters. Before invoking the AI Agent, BeautifulSoup strips all `<script>`, `<style>`, `<svg>`, and `<head>` tags to cleanly compress the structure down to ~90,000 characters, ensuring it fits snugly within `gpt-4o-mini`'s maximum context limits.
-2. **The `UNHEALABLE_SELECTORS` Cache**: To prevent bankrupting user OpenAI credits during loops, if the Agent determines that a selector is genuinely missing from the DOM (e.g. you have already applied to a listing, or the modal is fundamentally missing), it outputs `FAILURE`. The script caches this result and instantly skips similar AI calls for the remainder of the session.
-3. **JS Hydration Race Condition Bypasses**: The automation natively intercepts Playwright's default actionability checks, implementing hard-delays over dynamic application modals to ensure that React/Angular click listeners are completely bound before attempting simulated user-input.
-4. **Adaptive Context String Evaluators**: Because LLM structured outputs (like YAML format requirements) can drift, the self-healing orchestrator relies on strict python-level parsing to extract the YAML dictionary blocks rather than soft string matching, preventing verbose AI audit reports from crashing the `CrewAI` sequence.
+2. **Batch Evaluation for Extraction**: Because extracting data happens 50+ times per page, pausing to heal a single listing is inefficient. The script extracts everything it can, calculates a failure rate, and *if the failure rate > 50%*, triggers a single AI heal for all broken keys simultaneously, then automatically retries.
+3. **The `UNHEALABLE_SELECTORS` Cache**: To prevent bankrupting user OpenAI credits during loops, if the Agent determines that a selector is genuinely missing from the DOM (e.g. you have already applied to a listing, or the modal is fundamentally missing), it outputs `FAILURE`. The script caches this result and instantly skips similar AI calls for the remainder of the session.
+4. **JS Hydration Race Condition Bypasses**: The automation natively intercepts Playwright's default actionability checks, implementing hard-delays over dynamic application modals to ensure that React/Angular click listeners are completely bound before attempting simulated user-input.
+5. **Adaptive Context String Evaluators**: Because LLM structured outputs (like YAML format requirements) can drift, the self-healing orchestrator relies on strict python-level parsing to extract the YAML dictionary blocks rather than soft string matching, preventing verbose AI audit reports from crashing the `CrewAI` sequence.
 
 ## Setup & Installation
 
