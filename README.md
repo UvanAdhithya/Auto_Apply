@@ -12,8 +12,9 @@ What makes this project truly unique is its **Self-Healing Agentic Workflow**. W
 2. **Comprehensive Self-Healing**: Web layouts break constantly. This bot handles failures at two layers:
    - **Data Extraction**: If Internshala updates the listing layout, the bot calculates the extraction failure rate across all listings. If the failure rate exceeds 50%, it triggers a bulk-heal on all broken extraction selectors.
    - **Click/Interaction**: If a button's ID or Class changes and causes a Playwright `TimeoutError`, a CrewAI Agent steps in, reads the active DOM, fixes the selector in `selectors.yaml`, and instantly resumes the script.
-3. **Application Logging**: Keeps a JSON log file of all successful applications including company name, role, and the application URL so you can track your progress.
-4. **Dry Run Mode**: Safely test your automation setup without actually submitting an application to any company.
+3. **WhatsApp AI Notifications**: Includes a secondary engine that monitors the Internshala chat portal. When an employer responds to an applied role, GPT-4o summarizes who they are and what they want, and instantly sends you a notification via Twilio WhatsApp.
+4. **Application Logging**: Keeps a CSV log file of all successful applications including company name, role, and the application URL so you can track your progress.
+5. **Dry Run Mode**: Safely test your automation setup without actually submitting an application to any company.
 
 ## Architecture
 
@@ -55,6 +56,12 @@ Create a `.env` file in the root directory and add your credentials:
 INTERNSHALA_USERNAME="your_email@example.com"
 INTERNSHALA_PASSWORD="your_secret_password"
 OPENAI_API_KEY="sk-your-openai-api-key"
+
+# Optional: Twilio WhatsApp Notifications
+TWILIO_ACCOUNT_SID="ACxxx..."
+TWILIO_AUTH_TOKEN="yyy..."
+TWILIO_WHATSAPP_NUMBER="whatsapp:+14155238886"
+USER_WHATSAPP_NUMBER="whatsapp:+91800..."
 ```
 
 You can customize the job search keywords directly in `script.py`. 
@@ -71,8 +78,13 @@ python script.py
 python script.py --dry-run
 ```
 
+**Check Messages (WhatsApp Alerts):**
+```bash
+python script.py --check-messages
+```
+
 **Application Logs:**
-All successful applications (or simulated dry runs) are saved to `logs/internshala_applied.json`.
+All successful applications (or simulated dry runs) are saved to `logs/internshala_applied.csv`.
 
 ## Disclaimer
 
