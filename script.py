@@ -176,6 +176,8 @@ def search_and_filter_internships(page):
         # Wait for a common element that indicates listings are present
         page.wait_for_selector(SELECTORS["internship_listings"], timeout=20000)
         print("Internship listings page loaded.")
+        # Give lazy-loaded / JS-hydrated content time to fully render
+        page.wait_for_timeout(3000)
         return True
     except PlaywrightTimeoutError as e:
         print(f"Failed to load internship listings: Timeout. {e}")
@@ -195,7 +197,16 @@ def apply_one_click_internships(page, keywords, dry_run=False):
     """
     print(f"\nScanning listings on matching preferences page for one-click apply (popup flow)...")
     applied_records = []
+
+    # Take a debug screenshot of the page state before processing
+    try:
+        page.screenshot(path=os.path.join(os.getcwd(), "debug_listings_page.png"))
+        print("Saved debug screenshot: debug_listings_page.png")
+    except Exception:
+        pass
+
     listings = page.query_selector_all(SELECTORS["internship_listings"])
+    print(f"query_selector_all('{SELECTORS['internship_listings']}') returned {len(listings)} elements.")
 
     if not listings:
         print("No listings found on the matching preferences page.")
@@ -203,14 +214,31 @@ def apply_one_click_internships(page, keywords, dry_run=False):
 
     # First, collect all listings so we don't pollute the DOM iteration by navigating away
     listings_data = []
+    skipped_hidden = 0
+    skipped_missing = 0
     
     for i, listing in enumerate(listings, start=1):
         try:
+            # Skip hidden/ad listings
+            try:
+                if not listing.is_visible():
+                    skipped_hidden += 1
+                    continue
+            except Exception:
+                pass
+
             company_el = listing.query_selector(SELECTORS["company_name"])
             role_el = listing.query_selector(SELECTORS["role_name"])
             listing_url_el = listing.query_selector(SELECTORS["listing_url"])
 
             if not (company_el and role_el and listing_url_el):
+                missing = []
+                if not company_el: missing.append(f"company_name ('{SELECTORS['company_name']}')") 
+                if not role_el: missing.append(f"role_name ('{SELECTORS['role_name']}')") 
+                if not listing_url_el: missing.append(f"listing_url ('{SELECTORS['listing_url']}')") 
+                if skipped_missing < 3:  # Only print first 3 for brevity
+                    print(f"  Listing {i}: SKIPPED — missing: {', '.join(missing)}")
+                skipped_missing += 1
                 continue
 
             company = company_el.inner_text().strip()
@@ -218,12 +246,18 @@ def apply_one_click_internships(page, keywords, dry_run=False):
             listing_url = listing_url_el.get_attribute("href")
             if not listing_url.startswith("http"):
                 listing_url = "https://internshala.com" + listing_url
+            
+            # Skip external aggregator URLs (e.g. appcast.io) — they redirect off-site
+            if "internshala.com" not in listing_url and listing_url.startswith("http"):
+                continue
                 
             listings_data.append({
                 "index": i, "company": company, "role": role, "listing_url": listing_url
             })
         except Exception as e:
             print(f"Error extracting listing {i}: {e}")
+    
+    print(f"\nExtraction summary: {len(listings_data)} valid, {skipped_hidden} hidden, {skipped_missing} missing selectors (of {len(listings)} total)")
 
     # Now navigate to each listing directly
     for data in listings_data:
