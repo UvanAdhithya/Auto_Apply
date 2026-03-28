@@ -187,6 +187,148 @@ def search_and_filter_internships(page):
         return False
 
 
+def _try_extract_all(listings):
+    """
+    Pure extraction logic — no healing. Iterates every listing element and
+    tries to pull company, role, and URL from each one.
+
+    Returns:
+        (listings_data, failed_keys)
+        - listings_data: list of dicts with index/company/role/listing_url
+        - failed_keys:   set of selector keys that failed (e.g. {'role_name', 'listing_url'})
+    """
+    listings_data = []
+    failed_keys = set()
+    skipped_hidden = 0
+    skipped_missing = 0
+
+    for i, listing in enumerate(listings, start=1):
+        try:
+            # Skip hidden/ad listings
+            try:
+                if not listing.is_visible():
+                    skipped_hidden += 1
+                    continue
+            except Exception:
+                pass
+
+            company_el = listing.query_selector(SELECTORS["company_name"])
+            role_el = listing.query_selector(SELECTORS["role_name"])
+            listing_url_el = listing.query_selector(SELECTORS["listing_url"])
+
+            if not (company_el and role_el and listing_url_el):
+                missing = []
+                if not company_el:
+                    missing.append("company_name")
+                    failed_keys.add("company_name")
+                if not role_el:
+                    missing.append("role_name")
+                    failed_keys.add("role_name")
+                if not listing_url_el:
+                    missing.append("listing_url")
+                    failed_keys.add("listing_url")
+                if skipped_missing < 3:
+                    print(f"  Listing {i}: SKIPPED — missing: {', '.join(missing)}")
+                skipped_missing += 1
+                continue
+
+            company = company_el.inner_text().strip()
+            role = role_el.inner_text().strip()
+            listing_url = listing_url_el.get_attribute("href")
+            if not listing_url.startswith("http"):
+                listing_url = "https://internshala.com" + listing_url
+
+            # Skip external aggregator URLs (e.g. appcast.io) — they redirect off-site
+            if "internshala.com" not in listing_url and listing_url.startswith("http"):
+                continue
+
+            listings_data.append({
+                "index": i, "company": company, "role": role, "listing_url": listing_url
+            })
+        except Exception as e:
+            print(f"Error extracting listing {i}: {e}")
+
+    print(f"  Extraction pass: {len(listings_data)} valid, {skipped_hidden} hidden, "
+          f"{skipped_missing} missing selectors (of {len(listings)} total)")
+    return listings_data, failed_keys
+
+
+def _trigger_extraction_heal(page, failed_keys):
+    """
+    Triggers the AI self-healing agent to fix extraction selectors.
+    This is the bridge between the extraction loop and agent.heal_selectors().
+    """
+    print(f"\n🔧 Self-healing: attempting to fix extraction selectors: {failed_keys}")
+    try:
+        screenshot_path = os.path.join(os.getcwd(), "healing_trigger_extraction.png")
+        page.screenshot(path=screenshot_path)
+
+        import agent
+        is_healed = agent.heal_selectors(page.content(), screenshot_path=screenshot_path)
+
+        if is_healed:
+            # Reload the fixed selectors from YAML
+            with open(SELECTORS_FILE, "r") as f:
+                SELECTORS.update(yaml.safe_load(f)["selectors"])
+            print("✅ Extraction selectors healed and reloaded from selectors.yaml.")
+            return True
+        else:
+            print("❌ Self-healing agent could not fix extraction selectors.")
+            return False
+    except Exception as e:
+        print(f"❌ Self-healing failed with error: {e}")
+        return False
+
+
+def robust_extract_listings(page, max_heal_attempts=1):
+    """
+    Self-healing wrapper around listing extraction.
+
+    Flow:
+      1. query_selector_all for the listings container.
+      2. Try extracting company/role/url from each listing.
+      3. If >50% of visible listings fail extraction, trigger the self-healing
+         agent to fix the broken selectors, then retry.
+      4. Return the successfully extracted listings.
+    """
+    for attempt in range(1 + max_heal_attempts):
+        attempt_label = f"(attempt {attempt + 1}/{1 + max_heal_attempts})"
+
+        # Step 1: Find all listing elements
+        listings = page.query_selector_all(SELECTORS["internship_listings"])
+        print(f"\n{attempt_label} query_selector_all('{SELECTORS['internship_listings']}') "
+              f"returned {len(listings)} elements.")
+
+        if not listings:
+            if attempt < max_heal_attempts:
+                print("No listings found — container selector may be broken.")
+                healed = _trigger_extraction_heal(page, {"internship_listings"})
+                if healed:
+                    continue
+            print("No listings found on the matching preferences page.")
+            return []
+
+        # Step 2: Attempt extraction
+        listings_data, failed_keys = _try_extract_all(listings)
+
+        # Step 3: Evaluate failure rate & heal if necessary
+        total_visible = max(len(listings), 1)
+        fail_rate = 1 - (len(listings_data) / total_visible)
+
+        if fail_rate > 0.5 and failed_keys and attempt < max_heal_attempts:
+            print(f"\n⚠️  High extraction failure rate ({fail_rate:.0%}). "
+                  f"Broken keys: {failed_keys}")
+            healed = _trigger_extraction_heal(page, failed_keys)
+            if healed:
+                print("Retrying extraction with healed selectors...")
+                continue
+            # If healing failed, fall through and use whatever we have
+
+        return listings_data
+
+    return []
+
+
 def apply_one_click_internships(page, keywords, dry_run=False):
     """
     On the matching-preferences page:
@@ -205,59 +347,8 @@ def apply_one_click_internships(page, keywords, dry_run=False):
     except Exception:
         pass
 
-    listings = page.query_selector_all(SELECTORS["internship_listings"])
-    print(f"query_selector_all('{SELECTORS['internship_listings']}') returned {len(listings)} elements.")
-
-    if not listings:
-        print("No listings found on the matching preferences page.")
-        return []
-
-    # First, collect all listings so we don't pollute the DOM iteration by navigating away
-    listings_data = []
-    skipped_hidden = 0
-    skipped_missing = 0
-    
-    for i, listing in enumerate(listings, start=1):
-        try:
-            # Skip hidden/ad listings
-            try:
-                if not listing.is_visible():
-                    skipped_hidden += 1
-                    continue
-            except Exception:
-                pass
-
-            company_el = listing.query_selector(SELECTORS["company_name"])
-            role_el = listing.query_selector(SELECTORS["role_name"])
-            listing_url_el = listing.query_selector(SELECTORS["listing_url"])
-
-            if not (company_el and role_el and listing_url_el):
-                missing = []
-                if not company_el: missing.append(f"company_name ('{SELECTORS['company_name']}')") 
-                if not role_el: missing.append(f"role_name ('{SELECTORS['role_name']}')") 
-                if not listing_url_el: missing.append(f"listing_url ('{SELECTORS['listing_url']}')") 
-                if skipped_missing < 3:  # Only print first 3 for brevity
-                    print(f"  Listing {i}: SKIPPED — missing: {', '.join(missing)}")
-                skipped_missing += 1
-                continue
-
-            company = company_el.inner_text().strip()
-            role = role_el.inner_text().strip()
-            listing_url = listing_url_el.get_attribute("href")
-            if not listing_url.startswith("http"):
-                listing_url = "https://internshala.com" + listing_url
-            
-            # Skip external aggregator URLs (e.g. appcast.io) — they redirect off-site
-            if "internshala.com" not in listing_url and listing_url.startswith("http"):
-                continue
-                
-            listings_data.append({
-                "index": i, "company": company, "role": role, "listing_url": listing_url
-            })
-        except Exception as e:
-            print(f"Error extracting listing {i}: {e}")
-    
-    print(f"\nExtraction summary: {len(listings_data)} valid, {skipped_hidden} hidden, {skipped_missing} missing selectors (of {len(listings)} total)")
+    # --- Self-healing extraction ---
+    listings_data = robust_extract_listings(page)
 
     # Now navigate to each listing directly
     for data in listings_data:

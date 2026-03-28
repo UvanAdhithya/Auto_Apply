@@ -62,15 +62,20 @@ def get_tasks(auditor, healer):
     # 4. Define the Tasks
     audit_task = Task(
         description=(
-            "A Playwright timeout occurred while searching for a selector. Here is the HTML dump of the page:\n\n"
+            "One or more CSS selectors used by our Playwright automation script are failing to match "
+            "elements on the Internshala page. This could be due to a site redesign, an A/B test, or "
+            "incorrect selectors.\n\n"
+            "The following selector keys are specifically broken: {broken_keys}\n\n"
+            "Here is the HTML dump of the page:\n\n"
             "```html\n{html_dump}\n```\n\n"
             "Here are our current expected selectors from selectors.yaml:\n\n"
             "```yaml\n{current_yaml}\n```\n\n"
-            "Task: Evaluate if the expected selectors still exist and are valid in the HTML dump. "
-            "Output an analysis detailing precisely which selector is broken, why it failed, and what "
-            "the new, correct CSS selector should be based on the HTML provided. If it's impossible to tell, output 'FAILURE'."
+            "Task: Focus on the broken keys listed above. For each one, find the correct CSS selector "
+            "that matches the corresponding element in the HTML dump. Provide an analysis detailing "
+            "precisely why the current selector is broken and what the correct replacement should be. "
+            "If a broken key is not present in the page HTML at all, output 'FAILURE' for that key."
         ),
-        expected_output="An audit report detailing broken selectors, or the word 'FAILURE'.",
+        expected_output="An audit report with corrected selectors for each broken key, or 'FAILURE'.",
         agent=auditor
     )
 
@@ -107,11 +112,19 @@ def clean_html(html_content):
     return cleaned_html
 
 # 5. Assemble the Crew and Run
-def heal_selectors(html_snippet, screenshot_path=None):
+def heal_selectors(html_snippet, screenshot_path=None, broken_keys=None):
     """
-    Called by script.py when a timeout error occurs. 
+    Called by script.py when selectors fail (click timeouts OR extraction misses). 
     Triggers the LLM self-healing workflow.
+    
+    Args:
+        html_snippet: Raw page HTML.
+        screenshot_path: Optional path to a screenshot of the page.
+        broken_keys: Optional set/list of specific selector keys that failed.
+                     If None, the agent audits all selectors.
     """
+    if broken_keys is None:
+        broken_keys = "all (unknown which specific keys are broken)"
     # Clean the HTML to ensure the actual visible elements reach the LLM
     html_snippet = clean_html(html_snippet)
     
@@ -137,7 +150,8 @@ def heal_selectors(html_snippet, screenshot_path=None):
     try:
         result = crew.kickoff(inputs={
             'html_dump': html_snippet[:100000],  # Send the full compressed DOM snapshot
-            'current_yaml': current_yaml
+            'current_yaml': current_yaml,
+            'broken_keys': str(broken_keys)
         })
     except Exception as e:
         print(f"Error during fast pass kickoff: {e}")
@@ -164,7 +178,8 @@ def heal_selectors(html_snippet, screenshot_path=None):
         try:
             result = fallback_crew.kickoff(inputs={
                 'html_dump': html_snippet[:100000], # Pass the full valid DOM to the smarter model
-                'current_yaml': current_yaml
+                'current_yaml': current_yaml,
+                'broken_keys': str(broken_keys)
             })
         except Exception as e:
             print(f"Error during smart fallback kickoff: {e}")
